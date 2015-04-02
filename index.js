@@ -24,7 +24,11 @@ function WebCrawler() {
 	self.targetPath = "192.168.12.41:1505/";
 
 	self.resolvePath = function (url) {
-		if(url[0] == "/" || url[0] == "./") {
+		if (url[0] == "/" || url[0] == "./") {
+			if (self.targetPath[self.targetPath.length-1] != "/") {
+				self.targetPath += "/";
+			}
+
 			url = self.targetPath + url.slice(1);
 		}
 
@@ -80,7 +84,9 @@ function WebCrawler() {
 	};
 
 	self.startCrawling = function (url, levels, callback) {
-		self.targetPath = url;
+		if (url.indexOf("http://") + 1) {
+			self.targetPath = url;
+		}
 
 		var promises = [];
 
@@ -96,16 +102,19 @@ function WebCrawler() {
 			waterfall,
 			
 			function (err, result) {
-				fs.open("./outputFile.js", "w", function (err, fd) {
+				fs.open("./outputFile.json", "w", function (err, fd) {
 					result = result.toString();
 
-					var forOutput = result;
+					var arr = result.split(",");
+					var obj = {};
 
-					while (forOutput.indexOf(",")+1) {
-						forOutput = forOutput.replace(",", "\n");
-					}
+					arr.forEach(function (elem, ind) {
+						obj[elem] = true;
+					});
 
-					fs.write(fd, forOutput, function (err) {
+					var json = JSON.stringify(obj);
+
+					fs.write(fd, json, function (err) {
 						fs.close(fd, function () {
 							callback(null, result);
 						})
