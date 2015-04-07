@@ -3,6 +3,8 @@ var cheerio = require("cheerio");
 var request = require("request");
 var mime = require("mime");
 
+var uconcat = require('unique-concat');
+
 var async = require("async");
 
 var argv = require("minimist")(process.argv.slice(2), {
@@ -12,150 +14,92 @@ var argv = require("minimist")(process.argv.slice(2), {
 	}
 });
 
-var webCrawler = new WebCrawler();
+var totalLinks = [];
 
 if (argv.url && argv.levels) {
-	webCrawler.startCrawling(argv.url, argv.levels);
+	startCrawling(argv.url, argv.levels, function (err, data) {
+		process.stdout.clearLine();
+		process.stdout.cursorTo(0);
+
+		if (err) {
+			return console.log(err);
+		}
+
+		saveLinksToFile(data);
+
+		console.log("Look in ./outputFile.js");
+	});
 }
 
-function WebCrawler() {
-	var self = this;
+var getConcat = function (arr) {
+	var arr = [].concat.apply([], arr);
 
-	self.targetPath = "192.168.12.41:1505/";
+	return arr;
+};
 
-	self.resolvePath = function (url) {
-		if (url[0] == "/" || url[0] == "./") {
-			if (self.targetPath[self.targetPath.length-1] != "/") {
-				self.targetPath += "/";
-			}
+var getValidOnly = function (arr) {
+	var validArr = [];
 
-			url = self.targetPath + url.slice(1);
+	arr.forEach(function (item) {
+		if(item) {
+			validArr.push(item);
 		}
+	});
 
-		return url;
-	};
+	return validArr;
+};
 
-	self.getCrawlerPromises = function (urls, cb) {
+var setContentLinks = function (links) {
+	links = getValidOnly(links);
+
+	totalLinks = uconcat(totalLinks, links);
+};
+
+var crawlLinks = function (urls, currLevel, callback) {
+	console.log("Call crawl", urls, currLevel);
+	if (currLevel > 0) {
+		--currLevel;
 		var promises = [];
-
-		if (!urls || !urls.length) return false;
-
-		for (var i = 0; i < urls.length; i++) {
-			(function (url) {
-				promises.push(function (callback) {
-					self.getAllLinksOnPage(url, callback);
-				});
-			})(urls[i]);
-		}
+		urls.forEach(function (item) {
+			promises.push(function (cb) {
+				getUrlContent(item, cb);
+			});
+		});
 
 		async.series(
 			promises,
+			function (err, results) {
+				console.log("get results", err, results);
+				var links = getConcat(results);
 
-			function (err, result) {
-				cb(null, result);
-			}
-		);
-
-		return promises;
-	};
-
-	self.getWaterfall = function (url, levels) {
-		var waterfall = [
-			function (cb) {
-				self.getCrawlerPromises([url], function (err, links) {
-					cb(err, links, links);
-				});
-			}
-		];
-
-		--levels;
-
-		for (var i = 0; i < levels; i++) {
-			waterfall.push(function (allLinks, newLinks, cb) {
-				self.getCrawlerPromises(newLinks[0], function (err, links) {
-					allLinks.push(links);
-					showPending();
-					cb(err, allLinks, links);
-				});
-			});
-		}
-
-		return waterfall;
-	};
-
-	self.startCrawling = function (url, levels, callback) {
-		if (url.indexOf("http://") + 1) {
-			self.targetPath = url;
-		}
-
-		var promises = [];
-
-		if (!callback) callback = function (err, data) {
-			process.stdout.clearLine();
-			process.stdout.cursorTo(0);
-			console.log("Look in outputFile.js");
-		};
-
-		waterfall = self.getWaterfall(url, levels);
-
-		async.waterfall(
-			waterfall,
-			
-			function (err, result) {
-				fs.open("./outputFile.json", "w", function (err, fd) {
-					result = result.toString();
-
-					var arr = result.split(",");
-					var obj = {};
-
-					arr.forEach(function (elem, ind) {
-						obj[elem] = true;
-					});
-
-					var json = JSON.stringify(obj);
-
-					fs.write(fd, json, function (err) {
-						fs.close(fd, function () {
-							callback(null, result);
-						})
-						
-					});
-				});
-			}
-		);
-
-	};
-
-	self.getAllLinksOnPage = function (url, callback) {
-		async.waterfall([
-				function (c) {
-					self.getUrlContent(url, c);
-				},
-				function (content, c) {
-					var $ = cheerio.load(content);
-
-					var links = [];
-
-					$("a").each(function () {
-						links.push($(this).attr("href"));
-					});
-
-					showPending();
-					c(null, links);
+				if (currLevel > 0) {
+					return crawlLinks(links, currLevel, callback);
 				}
-		], function (err, res) {
-			if (err) {
-				console.log(err);
-				return callback(err, null);
-			}
-			return callback(null, res)
-		});
-	};
 
-	self.getUrlContent = function (url, callback) {
-		showPending();
+				totalLinks = getConcat(totalLinks);
+
+				saveLinksToFile(totalLinks);
+
+				callback(null, totalLinks);
+			}
+		);
+	}
+};
+
+var isUrlAbsolute = function (url) {
+	console.log("url", url, url.indexOf("http"));
+	if (url.indexOf("http")+1) {
+		return true;
+	}
+
+	return false;
+};
+
+var getUrlContent = function (url, callback) {
+	if (url && isUrlAbsolute(url)) {
+		setContentLinks([url]);
 		request.get({
-			url: self.resolvePath(url),
+			url: url,
 			header: {
 				"Content-Type": mime.lookup(url)
 			}
@@ -164,20 +108,37 @@ function WebCrawler() {
 				console.log(err);
 				return callback(err, null);
 			}
-			return callback(null, body);
+
+			var $ = cheerio.load(body);
+
+			var links = [];
+
+			$("a").each(function () {
+				links.push($(this).attr("href"));
+			});
+
+			callback(null, links);
 		});
+	} else {
+		callback(null, []);
 	}
 };
 
-var pendingStatus = 0;
+var saveLinksToFile = function (result) {
+	fs.open("./outputFile.json", "w", function (err, fd) {
+		var json = JSON.stringify(result);
 
-function showPending() {
-	process.stdout.clearLine();
-	process.stdout.cursorTo(0);
+		fs.write(fd, json, function (err) {
+			fs.close(fd, function () {})
 
-	var dots = new Array(++pendingStatus).join(".");
+		});
+	});
+};
 
-	process.stdout.write("Please wait: " + dots);
-}
+var startCrawling = function (url, levels, callback) {
+	totalLinks = [];
 
-module.exports = webCrawler;
+	crawlLinks([url], levels, callback);
+};
+
+module.exports.startCrawling = startCrawling;
