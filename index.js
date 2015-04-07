@@ -56,7 +56,6 @@ var setContentLinks = function (links) {
 };
 
 var crawlLinks = function (urls, currLevel, callback) {
-	console.log("Call crawl", urls, currLevel);
 	if (currLevel > 0) {
 		--currLevel;
 		var promises = [];
@@ -69,7 +68,6 @@ var crawlLinks = function (urls, currLevel, callback) {
 		async.series(
 			promises,
 			function (err, results) {
-				console.log("get results", err, results);
 				var links = getConcat(results);
 
 				if (currLevel > 0) {
@@ -87,7 +85,6 @@ var crawlLinks = function (urls, currLevel, callback) {
 };
 
 var isUrlAbsolute = function (url) {
-	console.log("url", url, url.indexOf("http"));
 	if (url.indexOf("http")+1) {
 		return true;
 	}
@@ -97,6 +94,7 @@ var isUrlAbsolute = function (url) {
 
 var getUrlContent = function (url, callback) {
 	if (url && isUrlAbsolute(url)) {
+		console.log("crawling  %s...", url);
 		setContentLinks([url]);
 		request.get({
 			url: url,
